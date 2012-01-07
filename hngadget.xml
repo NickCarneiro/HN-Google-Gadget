@@ -1,0 +1,370 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Module>
+  <ModulePrefs title="HN gadget with keyword filters"
+                title_url="http://news.ycombinator.com"
+                height="400" 
+                    author="Nick Carneiro" 
+                author_email="burthawk101+ihn@gmail.com"
+                description="Fork of @juliancaba's HN gadget. Just added keyword filter so you can only see news relevant to you."
+                screenshot="http://dl.dropbox.com/u/173112/iHackerNews.png"
+                thumbnail="http://dl.dropbox.com/u/173112/iGoogle.png" />
+ 
+  <!-- <UserPref name="myuser" display_name="username" datatype="string" /> -->
+  <Content type="html"><![CDATA[
+    <style type="text/css">
+      .content {
+        overflow: auto;
+      }
+      .tabs {
+        clear: both;
+        width: 100%;
+        height: 21px;
+        border-bottom: 1px solid #676767;
+        margin-bottom: 3px;
+      }
+      .tabs div {
+        height: 17px;
+        width: 25%;
+        margin-left: 5px;
+        padding-left: 10px;
+        padding-top: 3px;
+        float: left;
+        font-size: 9pt;
+        border-top-left-radius: 5px;
+        border-top-right-radius: 5px;
+        -moz-border-radius-topleft: 5px;
+        -moz-border-radius-topright: 5px;
+      }
+      .selected-tab {
+        border: 1px solid #676767;
+        border-bottom: 1px solid white;
+        color: #3366CC;
+        font-weight: bold;
+      }
+      .unselected-tab {
+        border: 1px solid #AAA;
+        border-bottom: 0px;
+        background-color: #DDD;
+        cursor: pointer;
+      }
+       .story {
+        padding: 0px;
+        margin: 0px;
+      }  
+      .story li {
+        display: inline;
+        list-style: none;
+      }
+      .storyArea {
+        margin: 0px;
+        font-size: 10pt;
+        font-family: 'Verdana';
+      }
+      .storyAreaDiv {
+        padding-top: 3px;
+      }
+      .storyTitle {
+        margin-bottom: 10px;
+        margin-right: 5px;
+        float: left;
+        width: 69%;
+        clear: left;
+      }
+      .storyTitle a, .comments a, .reload {
+        text-decoration: none;
+        color: #0059C6;
+      }
+      .storyInfo {
+        color: grey;
+        float: left;
+        width: 21%;
+      }
+      .points, .plusplus, .comments, .spacer {
+        float: left;
+      }
+      .points {
+        width: 45%;
+        cursor: default;
+      }
+      .comments {
+        text-align: right;
+        width: 45%;
+      }
+      .comments a:hover, .reload {
+        text-decoration: underline;
+        cursor: pointer;
+      }
+      .close {
+        float: right;
+         cursor: pointer;
+         padding-right: 5px;
+      }
+      .loadMore {
+        -webkit-box-shadow: #888 2px 2px 3px;
+        -moz-box-shadow: #888 2px 2px 3px;
+        box-shadow: #888 2px 2px 3px;
+        background-color: #CCD;
+        border-radius: 5px;
+        -moz-border-radius: 5px;
+        margin-bottom: 10px;
+        clear: both;
+        color: #0059C6;
+        cursor: pointer;
+        font-family: Verdana;
+        font-size: 10pt;
+        padding: 5px 0px;
+        text-align: center;
+        width: 99%;
+      }
+    </style>
+    <div class="tabs">
+      <div id="news" class="selected-tab">News</div>
+      <div id="newest" class="unselected-tab">Newest</div>
+    </div>
+    <div id="content_div" class="content"><center><h2 id="loading">Loading . . .</h2></center></div>
+    <script type="text/javascript">
+      var NEWS_URL = "http://api.ihackernews.com/page/";
+      var NEWEST_URL = "http://api.ihackernews.com/new/";
+      
+      var SELECTED_TAB_CLASS = "selected-tab";
+      var UNSELECTED_TAB_CLASS = "unselected-tab";
+      
+      var NEWS_TAB_ID = "news";
+      var NEWEST_TAB_ID = "newest";
+      
+      var TAB_IDS = [NEWS_TAB_ID, NEWEST_TAB_ID];
+      var TAB_ID_TO_URL = [];
+      TAB_ID_TO_URL[NEWS_TAB_ID] = NEWS_URL;
+      TAB_ID_TO_URL[NEWEST_TAB_ID] = NEWEST_URL;
+
+      var isLoading = false;
+      var loadingId;
+
+      var whitelist = ['.js', 
+      'javascript', 'js', 
+      'ecmascript', 'jquery', 
+      'coffeescript', 'node', 
+      'austin', 'html5', 'conference'];
+      
+      /**
+       * Selects the tab by id and unselects the other tabs.
+       * @param {string} tabId The id of the tab element that is to be selected.
+       */
+      function selectTab(tabId) {
+        for (var i = 0, len = TAB_IDS.length; i < len; i++) {
+          var currentTabId = TAB_IDS[i];
+          if (tabId === currentTabId) {
+            document.getElementById(currentTabId).className = SELECTED_TAB_CLASS;
+          } else {
+            var unselectedTab = document.getElementById(currentTabId);
+            unselectedTab.className = UNSELECTED_TAB_CLASS;
+          }
+        }
+      }
+
+      /**
+       * Gets a hex color for the number of points a story has (the more points, the darker.)
+       * @param {int} points The number of points a story has.
+       */
+      function getHexColorForPoints(points) {
+        if (points <= 50) {
+          return "BBB";
+        } else if (points <= 60) {
+          return "AAA";
+        } else if (points > 60 && points <= 149) {
+          return (999 - 111 * (Math.floor(points / 10) * 10 - 60) / 10) + "";
+        } else {
+          return "111";
+        }
+      }
+      
+      /**
+       * Creates an HTML representation of the stories array.
+       * @param {object[]} stories An array of story data
+       */
+      function makeStoriesList(stories) {      
+        var storyHtmlBuf = [];
+        for (var i = 0, storiesToShow = stories.length; i < storiesToShow; i++)
+        {
+          var story = stories[i];
+
+            //check for items in whitelist. Only render if they are found.
+            var matches = 0;
+            for(var j = 0; j < whitelist.length; j++){
+              var lowerTitle = story.title.toLowerCase();
+              if(lowerTitle.indexOf(whitelist[j]) > -1){
+                matches++;
+              }
+            }
+
+            //skip if none of whitelist strings matched this story title.
+            if(matches === 0){
+              continue;
+            }
+          
+          
+          storyHtmlBuf[storyHtmlBuf.length] = "<span id=\'";
+          storyHtmlBuf[storyHtmlBuf.length] = story.id;
+          storyHtmlBuf[storyHtmlBuf.length] = "\'><ul class=\'story\'><li class=\'storyArea\'><div class=\'storyAreaDiv\'><div class=\'storyTitle\'><a target=\'_blank\' href=\'";
+          storyHtmlBuf[storyHtmlBuf.length] = story.url.charAt(0) === "/" ? /* API HACK - should be "http://news.ycombinator.com" + story.url*/ "http://news.ycombinator.com/item?id="+story.id : story.url;
+          storyHtmlBuf[storyHtmlBuf.length] = "\' title=\'Submitted by ";
+          storyHtmlBuf[storyHtmlBuf.length] = story.postedBy + " " + story.postedAgo;
+          storyHtmlBuf[storyHtmlBuf.length] = "\'>";
+          storyHtmlBuf[storyHtmlBuf.length] = story.title;
+          var numPoints = story.points;
+          storyHtmlBuf[storyHtmlBuf.length] = "</a></div><div class=\'storyInfo\'><div class=\'points\' title=\'points\' style=\'color:#"+getHexColorForPoints(numPoints)+"\'>";
+          storyHtmlBuf[storyHtmlBuf.length] = numPoints;
+          storyHtmlBuf[storyHtmlBuf.length] = "</div><div class=\'spacer\'>|</div><div class=\'comments\'><a target=\'_blank\' href=\'";
+          storyHtmlBuf[storyHtmlBuf.length] = "http://news.ycombinator.com/item?id="+story.id;
+          storyHtmlBuf[storyHtmlBuf.length] = "\' title=\'comments\'>";
+          storyHtmlBuf[storyHtmlBuf.length] = story.commentCount;
+          storyHtmlBuf[storyHtmlBuf.length] = "</a></div></div>";
+          storyHtmlBuf[storyHtmlBuf.length] = "<div class=\'close\' title=\'hide story\' onclick=\'var x = document.getElementById(\""+story.id+"\"); x.parentNode.removeChild(x);\'>x</div></div></li></ul></span>";
+        }
+        return storyHtmlBuf.join("");
+      }
+
+      /**
+       * Clears out the contents and displays a page of news.
+       * @param {object} json The json object that results from calling gadgets.io.makeRequest.
+       */
+      function displayNews(json) {
+        if(!json || !json.data) { return; }
+        // Get the news data
+        var reqData = json.data;
+        var stories = reqData.items;
+
+        // Set the background color according to the mycolor userpref
+        var content = document.getElementById('content_div');  
+        content.style.height=375;
+
+        // Set the stories as the content        
+        content.innerHTML = makeStoriesList(stories);
+        var loadMore = document.createElement('div');
+        loadMore.className = "loadMore";
+        loadMore.innerHTML = "Load more!";
+        loadMore.onclick = function() { 
+          loadMore.innerHTML = "Loading ...";
+          loadMoreStories(loadMore, reqData.nextId);
+        };
+        content.appendChild(loadMore);
+        //toggleLoading();
+      }
+      
+      /**
+       * Make the JSON request - somewhat flexible, but has some defaults (see below.)
+       * @param {string} url The url to make the request to. Defaults to the NEWS_URL constant.
+       * @param {function} callback The callback method to call with the JSON result. Defaults to the displayNews function.
+       */
+      function makeJSONRequest(url, callback) {
+        if(!url) { url = NEWS_URL; } //default to news url
+        url += "?rndm="+Math.round(Math.random()*1000);
+        if(!callback) { callback = displayNews; } // default to displaying news
+        var params = {};
+        params[gadgets.io.RequestParameters.CONTENT_TYPE] = 
+          gadgets.io.ContentType.JSON;
+        // This URL returns a JSON-encoded string that represents a JavaScript object
+        var carefulCallback = function(json) {
+          if(json.data) {
+            callback(json);
+          } else {
+            var content = document.getElementById('content_div');
+            if(!document.getElementById('error')) {
+              var errorMsg = document.createElement('center');
+              errorMsg.id = 'error';
+              errorMsg.innerHTML = "Ooops! Something's not working. Try to <a onclick=\'makeJSONRequest();\' class=\'reload\'>reload</a>.";
+              content.appendChild(errorMsg);
+              //toggleLoading();
+            }
+            setTimeout( "makeJSONRequest()", 1000);
+          }
+        };
+        gadgets.io.makeRequest(url, carefulCallback, params);
+      }
+
+      /** function toggleLoading = function(enable) {
+        if(typeof enable == "undefined") {
+          enable = !isLoading;
+        }
+
+        if(enable) {
+          loadingId = setInterval(function() {
+            var loadingEl = document.getElementById('loading');
+            var loadingElContent = loadingEl.innerHTML;
+            if(loadingElContent === "Loading . . .") {
+              loadingEl.innerHTML = "Loading . .";
+            } else if(loadingElContent === "Loading . .") {
+              loadingEl.innerHTML = "Loading . . .";
+            }
+          }, 250);
+        } else {
+          clearInterval(enable);
+        }
+
+        isLoading = enable;
+      } */
+      
+      /**
+       * Returns the id of the selected tab.
+       */
+      function getSelectedTabId() {
+        if (document.getElementById(NEWS_TAB_ID).className === SELECTED_TAB_CLASS) {
+          return NEWS_TAB_ID;
+        } else if (document.getElementById(NEWEST_TAB_ID).className === SELECTED_TAB_CLASS) {
+          return NEWEST_TAB_ID;
+        }
+        return "";
+      }
+      
+      /**
+       * Load more stories below the current ones.
+       * @param {HTMLElement} loadMore The HTML element the user clicks on to load more. This can probably be rewritten to find the element by ID, but I am keeping it like this for now since it's more efficient.
+       * @param {string} nextId The iHackerNews page id of the last page loaded (so we know what is the next page we need to load.)
+       */
+      function loadMoreStories(loadMore, nextId) {
+        function callback(json) {
+          var reqData = json.data;
+          var stories = reqData.items;
+          var content = loadMore.parentNode;
+          loadMore = content.removeChild(loadMore);
+          loadMore.innerHTML = "Load more!";
+          loadMore.onclick = function() { 
+            loadMore.innerHTML = "Loading ...";
+            loadMoreStories(loadMore, reqData.nextId);
+          };
+          if(stories.length) {
+            content.innerHTML += makeStoriesList(stories);
+            content.appendChild(loadMore);
+          } else {
+            // uh oh, no stories - start over!
+            makeJSONRequest();
+          }
+        }
+        
+        var selectedTabId = getSelectedTabId();
+        var url = selectedTabId === "" ? NEWS_URL : TAB_ID_TO_URL[selectedTabId]; // default to news
+        makeJSONRequest(url + nextId, callback);
+      }
+      
+      /**
+       * Collects all the initialization steps into one function.
+       */
+      function init() {
+        makeJSONRequest();
+        document.getElementById(NEWS_TAB_ID).onclick = function() {
+          selectTab(NEWS_TAB_ID);
+          makeJSONRequest(TAB_ID_TO_URL[NEWS_TAB_ID]);
+        };
+        document.getElementById(NEWEST_TAB_ID).onclick = function() {
+          selectTab(NEWEST_TAB_ID);
+          makeJSONRequest(TAB_ID_TO_URL[NEWEST_TAB_ID]);
+        };
+      }
+      
+      // make the JSON request when the page is ready
+      gadgets.util.registerOnLoadHandler(init);
+    </script> 
+     ]]>  
+  </Content>
+</Module>
+
